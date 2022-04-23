@@ -1,0 +1,161 @@
+---
+title: "Pre-processing"
+author: "Alexandru Craevschi"
+date: "23 04 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ape)
+library(dagitty)
+library(datasets)
+library(data.table)
+library(dplyr)
+library(fdrtool)
+library(flextable)
+library(ggcorrplot)
+library(patchwork)
+library(rethinking)
+library(reshape2)
+library(lazyWeave)
+library(lingtypology)
+library("cowplot")
+
+options(mc.cores = detectCores())
+```
+
+```{r}
+geodistance <- readRDS("walking_distances.rds")/1000000 # distance in thousands of km
+geodistance <- geodistance[order(rownames(geodistance)), order(colnames(geodistance))]
+phylodistance <- readRDS("df_phylo_glotto_delta0_65.rds")
+phylo.corr <- vcv.phylo(phylodistance, corr = TRUE)
+phylo.corr <- phylo.corr[order(rownames(phylo.corr)), order(colnames(phylo.corr))]
+
+# Due to number of digits after comma, some numbers slightly differ 
+# the difference is minor but affects the model
+# The following piece of code tackles this problem 
+
+for (i in 1:length(colnames(geodistance))){
+  for (j in 1:length(colnames(phylo.corr))){
+    geodistance[i, j] <- round(geodistance[j, i], digits = 3)
+    phylo.corr[i, j] <- round(phylo.corr[j, i], digits = 3)
+  }
+}
+```
+
+```{r}
+# If the output of phylo.corr is inspected, the distance between two completely unrelated
+# doculects is 0, so I transform it to make 1 
+mod_phylo.corr <- matrix(0, nrow(phylo.corr), ncol(phylo.corr))
+colnames(mod_phylo.corr) <- colnames(phylo.corr)
+rownames(mod_phylo.corr) <- rownames(phylo.corr)
+for (i in 1:nrow(phylo.corr)){
+  for (j in 1:ncol(phylo.corr)){
+    mod_phylo.corr[i, j] <- abs(phylo.corr[i, j] - 1)
+  }
+}
+```
+
+
+
+
+```{r}
+wowa <- data.table( 
+  read.csv("whole_wowa/whole_wowa.tsv", sep="\t", header=T,
+           stringsAsFactors=FALSE,
+           fill=NA)) %>% 
+  mutate(role_simple = ifelse((role == "do" | role == "do-def"), "do", "non-do"),
+             anim_simple = ifelse(anim == "hum", "hum", "non-hum"), 
+             flag_simple = ifelse(flag == "bare", "bare", "non-bare"),
+             pro_simple = ifelse(pro == "", "NP", "pro"),
+             latitude = as.numeric(location1), 
+             longitude = as.numeric(location2),
+             family = affiliation1) %>% 
+  mutate(role_mod = 
+           ifelse(
+             (role == "do" | role == "do-def" | role == "poss"), "do", ifelse(
+                 (role == "goal" | role == "goal-c"), "goal", ifelse(
+                   (role == "cop"), "cop", ifelse(
+                     (role == "becm" | role == "becm-c"), "becm", "other"
+                   )
+                 )
+             )
+           )
+  ) %>% 
+  # We avoid forms that are hard to be classified as either pronoun or noun phrase
+  # We avoid missing data, there are only few such data points, most notably
+  # there is Christian NENA variety of Barwar without the geographical coordinates
+  filter(!is.na(latitude) & 
+           !is.na(weight) & 
+           (pro != "wh") &
+           (pro != "other")) 
+  
+
+```
+
+
+
+```{r}
+# Text IDs are unique across individual doculects, so I make it individual for the whole dataset
+doculects <- wowa$doculect
+textID <- wowa$textID
+
+newID <- c(1)
+indexID <- 1
+
+for (i in 2:length(doculects)){
+  if (doculects[i] == doculects[i-1] & textID[i] == textID[i-1]){
+    newID <- c(newID, indexID)
+  } else {
+    indexID <- indexID + 1
+    newID <- c(newID, indexID)
+  }
+}
+
+wowa$new_textID <- newID
+```
+
+```{r}
+# Random division of the dataset in two parts
+set.seed(1586)
+index <- sample(1:nrow(wowa), round(0.7*nrow(wowa), digits = 0))
+
+wowa_sample <- wowa[index,] # used for training
+wowa_sample_pred <- wowa[-index,] # used for predictions
+```
+
+```{r}
+# Stan requires data to be passed as list
+## Also note, that Stan does not accept R's factors, indexes need to be passed as integers
+
+training_set <- with(wowa_sample, list(
+  weight = weight,
+  pos = position,
+  geo_dist = geodistance,
+  phylo = mod_phylo.corr,
+  num_doc = length(unique(doculect)),
+  textID = new_textID,
+  role = as.integer(factor(role_mod)),
+  flag = as.integer(factor(flag_simple))
+))
+
+testing_set <- with(wowa_sample_pred, list(
+  weight = weight,
+  pos = position,
+  geo_dist = geodistance,
+  phylo = mod_phylo.corr,
+  num_doc = length(unique(doculect)),
+  textID = new_textID,
+  role = as.integer(factor(role_mod)),
+  flag = as.integer(factor(flag_simple))
+))
+```
+
+```{r}
+# Save the data
+
+saveRDS(training_set, "training_set.rds")
+saveRDS(testing_set, "testing_set.rds")
+```
+
