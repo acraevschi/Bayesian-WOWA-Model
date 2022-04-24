@@ -9,7 +9,7 @@ To reproduce the analysis, one should open and run the relevant R Markdown noteb
 
 1) *glottoTrees.Rmd* and *walking_distance.Rmd* in any order
 2) *pre-processing.Rmd* 
-3) *running_stan.Rmd*, which requires *model.stan*, so you might want to inspect the latter first.
+3) *running_stan.Rmd*, which requires *model.stan*, so you might want to inspect the latter first
 
 All the files have used `set.seed()` function to allow the full reproducibility, although one can try to erase (comment out) those lines to check if the model yields similar results and that seed number was not cherry-picked.
 
