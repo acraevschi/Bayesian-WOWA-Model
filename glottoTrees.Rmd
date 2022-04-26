@@ -42,6 +42,8 @@ all_wowa <- keep_tip(all_wowa, wowa_tips)
 wowa_names <- as.character(glotto_correspond[,1])
 glotto_wowa <- as.character(glotto_correspond[,2])
 
+# The following simply renames the tips 
+## By default, tips are named with glottocodes and we want WOWA names instead
 for (i in 1:length(all_wowa$tip.label)){
   tip_glotto <- all_wowa$tip.label[i]
   index <- match(tip_glotto, glotto_wowa)
@@ -52,11 +54,12 @@ for (i in 1:length(all_wowa$tip.label)){
 
 
 ```{r}
+# Normalize branch lengths and plot the results 
 phylo.corr <- vcv.phylo(all_wowa, corr = TRUE)
 ggcorrplot(phylo.corr, lab = T)
 plot(all_wowa)
 
-#write_rds(all_wowa, "df_phylo_glotto_no_scale.rds")
+#saveRDS(all_wowa, "df_phylo_glotto_no_scale.rds")
 ```
 
 ```{r}
@@ -67,7 +70,7 @@ all_wowa <- abridge_labels(
 )
 
 all_wowa <- assemble_rake(all_wowa)
-############# SCALING ####################
+### APPLYING SCALING ###
 all_wowa <- rescale(all_wowa, model = "delta", 0.65)
 
 wowa_tips <- wowa_glotto$glottocode
@@ -83,7 +86,7 @@ for (i in 1:length(all_wowa$tip.label)){
   all_wowa$tip.label[i] <- wowa_names[index]
 }
 
-# Normalize branch lengths and map them to interval [0, 1]
+# Normalize branch lengths
 phylo.corr <- vcv.phylo(all_wowa, corr = T)
 
 # Visualization of the results
