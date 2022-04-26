@@ -63,26 +63,21 @@ for (i in 1:nrow(phylo.corr)){
 ```{r}
 wowa <- data.table( 
   read.csv("whole_wowa/whole_wowa.tsv", sep="\t", header=T,
-           stringsAsFactors=FALSE,
-           fill=NA)) %>% 
-  mutate(role_simple = ifelse((role == "do" | role == "do-def"), "do", "non-do"),
-             anim_simple = ifelse(anim == "hum", "hum", "non-hum"), 
-             flag_simple = ifelse(flag == "bare", "bare", "non-bare"),
-             pro_simple = ifelse(pro == "", "NP", "pro"),
-             latitude = as.numeric(location1), 
-             longitude = as.numeric(location2),
-             family = affiliation1) %>% 
-  mutate(role_mod = 
-           ifelse(
-             (role == "do" | role == "do-def" | role == "poss"), "do", ifelse(
-                 (role == "goal" | role == "goal-c"), "goal", ifelse(
-                   (role == "cop"), "cop", ifelse(
-                     (role == "becm" | role == "becm-c"), "becm", "other"
-                   )
-                 )
-             )
-           )
+                  stringsAsFactors=FALSE,
+                  fill=NA) 
   ) %>% 
+  mutate(flag_simple = ifelse(flag == "bare", "bare", "non-bare"),
+             latitude = as.numeric(location1), 
+             longitude = as.numeric(location2)
+             ) %>% 
+  mutate(role_mod = 
+           case_when(
+             role %in% c("do", "do-def") ~ "do", 
+             role == "loc" ~ "loc",
+             role %in% c("goal", "goal-c") ~ "goal", 
+             role %in% c("cop", "cop-loc") ~ "cop", 
+             TRUE ~ "other"
+           )) %>% 
   # We avoid forms that are hard to be classified as either pronoun or noun phrase
   # We avoid missing data, there are only few such data points, most notably
   # there is Christian NENA variety of Barwar without the geographical coordinates
