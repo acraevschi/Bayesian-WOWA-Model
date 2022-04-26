@@ -18,7 +18,7 @@ library(patchwork)
 library(lingtypology)
 
 ## To reproduce the analysis, please register and set your own Google Maps API key. 
-### This is free of cost.
+### This is free of cost
 #### Then, use the following line to set the API key 
 
 #set.api.key("")
@@ -31,28 +31,11 @@ wowa <- data.table(
   read.csv("whole_wowa/whole_wowa.tsv", sep="\t", header=T,
                   stringsAsFactors=FALSE,
                   fill=NA) 
-  ) %>% mutate(role_simple = ifelse((role == "do" | role == "do-def"), "do", "non-do"),
-             anim_simple = ifelse(anim == "hum", "hum", "non-hum"), 
-             flag_simple = ifelse(flag == "bare", "bare", "non-bare"),
-             pro_simple = ifelse(pro == "", "NP", "pro"),
-             latitude = as.numeric(location1), 
-             longitude = as.numeric(location2),
-             family = affiliation1) %>% 
-  mutate(role_mod = 
-           ifelse(
-             (role == "do" | role == "do-def"), "do", ifelse(
-               (role == "loc"), "loc", ifelse(
-                 (role == "goal" | role == "goal-c"), "goal", ifelse(
-                   (role == "cop" | role == "cop-loc"), "cop", "other"
-                   )
-                 )
-               )
-             )
-           ) %>% 
-  filter(!is.na(latitude) & 
-           !is.na(weight) & 
-           (pro != "wh") &
-           (pro != "other"))
+  ) %>% 
+  mutate(
+    latitude = as.numeric(location1), 
+    longitude = as.numeric(location2)
+    )
 ```
 
 ```{r}
@@ -64,7 +47,6 @@ rownames(distances) <- unique(wowa$doculect)
 
 ```{r}
 # Slightly jitter northern+ankara to avoid complete overlap with Turkish from ankara
-
 wowa[doculect == "northern+ankara"]$latitude <- wowa[doculect == "northern+ankara"]$latitude + 0.05
 wowa[doculect == "northern+ankara"]$longitude <- wowa[doculect == "northern+ankara"]$longitude + 0.05
 
@@ -75,6 +57,7 @@ wowa[doculect == "musandam"]$longitude[1] <- 56.18
 
 
 ```{r}
+# Compute pairwise distance between all doculects
 for (i in 1:24){
   doc <- unique(wowa$doculect)[i]
   lat.i <- wowa[doculect == doc]$latitude[1]
