@@ -21,7 +21,6 @@ library(rethinking)
 
 ```{r}
 glotto_correspond <- read.csv("glottolog_correspondences.csv", sep = ";")
-glotto_correspond <- glotto_correspond[1:24,]
 doculects <- glotto_correspond$Glottocode
 ```
 
