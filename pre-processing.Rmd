@@ -132,7 +132,8 @@ training_set <- with(wowa_sample, list(
   num_doc = length(unique(doculect)),
   textID = new_textID,
   role = as.integer(factor(role_mod)),
-  flag = as.integer(factor(flag_simple))
+  flag = as.integer(factor(flag_simple)), 
+  doculect = as.integer(factor(doculect))
 ))
 
 testing_set <- with(wowa_sample_pred, list(
@@ -143,7 +144,8 @@ testing_set <- with(wowa_sample_pred, list(
   num_doc = length(unique(doculect)),
   textID = new_textID,
   role = as.integer(factor(role_mod)),
-  flag = as.integer(factor(flag_simple))
+  flag = as.integer(factor(flag_simple)),
+  doculect = as.integer(factor(doculect))
 ))
 ```
 
