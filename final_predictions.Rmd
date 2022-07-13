@@ -1,0 +1,516 @@
+---
+title: "Predictions"
+author: "Alexandru Craevschi"
+date: "18 02 2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ape)
+library(aplot)
+library(dagitty)
+library(datasets)
+library(data.table)
+library(fdrtool)
+library(ggcorrplot)
+library(ggpubr)
+library(geodist)
+library(ggplot2)
+library(ggmap)
+library(gmapsdistance)
+library(tidyverse)
+library(patchwork)
+library(rethinking)
+library(rstan)
+library(Rmisc)
+library(lingtypology)
+library("cowplot")
+#library(cmdstanr)
+library(flextable)
+library(reshape2)
+setwd("E:/Bamberg Uni/Typology course/brms_models")
+```
+
+```{r}
+# Read WOWA dataset
+wowa <- readRDS("wowa_recoded.rds")
+
+# WOWA dataset, only 30% used for testing | necessary for data plotting convenience
+test_set <- readRDS("wowa_test_set_dt.rds")
+
+# Read the file with data list that will be used for predictions
+stan_data30 <- readRDS("final_testing_set.rds")
+
+# Read the file with saved model's fit
+final_model <- readRDS("upd_prior_fitted/final_training_model_4chains.rds")
+```
+
+
+```{r}
+ext_fit <- extract(final_model)
+rm(final_model)
+
+phy <- ext_fit$phy
+geo <- ext_fit$geo
+role_flag <- ext_fit$role_flag
+beta_w <- ext_fit$beta_w
+textID <- ext_fit$text
+
+
+predict_pos <- function(test, sample_size = 1000){
+  size_p <- length(test$role)
+  list_prob <- list()
+  for (i in 1:size_p){ 
+    lin_comb <- sample(phy[,test$doculect[i]], size = sample_size) +
+      sample(geo[,test$doculect[i]], size = sample_size) +
+      sample(role_flag[,test$role[i], test$flag[i]], size = sample_size) +
+      sample(textID[,test$text], size = sample_size) +
+      sample(beta_w, size = sample_size)*test$weight[i]
+  
+    prob <- 1/(1 + exp(-lin_comb))
+    list_prob[[i]] <- prob
+  }
+  return(list_prob)
+}
+
+list_prob <- predict_pos(stan_data30, sample_size = 1000)
+mean_prob <- c()
+
+for (i in 1:length(list_prob)){
+  mean_prob <- c(mean_prob, mean(list_prob[[i]]))
+}
+
+
+test_set$predict_mean <- mean_prob
+```
+
+
+
+```{r}
+all_pred <- 
+  ggplot(test_set) +
+  geom_jitter(aes(x = predict_mean, 
+                  y = position, 
+                  color = role_mod, 
+                  shape = flag_simple),
+              na.rm = TRUE, size = 3.5, 
+              width = 0.05) +
+  facet_wrap(~affiliation2 + doculect, ncol = 4) +
+  geom_hline(yintercept = 0.5) +
+  geom_vline(xintercept = 0.5) +
+  ylim(0, 1) +
+  xlim(0, 1) +
+  labs(color = "Role:", shape = "Marking:", size = 2) +
+  labs(x = "Predicted value of *p*", 
+       y = "Position in WOWA") +
+  theme_bw() +
+  theme(legend.position="bottom",
+        axis.title.x = ggtext::element_markdown(), 
+        legend.text=element_text(size=10.5)) +
+  scale_y_continuous(limits =c(0, 1), breaks = c(0, 1)) +
+  scale_color_brewer(palette = "Set1")
+all_pred
+ggsave("all_prediction.png", units = "px", 
+       width = 3158, height = 3566)
+
+```
+
+```{r}
+test_set <- test_set %>% 
+  mutate(pro_simple = ifelse(pro == "", "NP", "pro"))
+
+kumzari <- 
+ggplot(test_set[doculect == "musandam"]) +
+  geom_jitter(aes(x = predict_mean, 
+                  y = position, 
+                  color = role_mod, 
+                  shape = pro_simple),
+              na.rm = TRUE, size = 3.5, 
+              width = 0.1) +
+  facet_wrap(~affiliation2 + doculect) +
+  geom_hline(yintercept = 0.5) +
+  geom_vline(xintercept = 0.5) +
+  ylim(0, 1) +
+  xlim(0, 1) +
+  labs(color = "Role:", shape = "Form:", size = 2) +
+  labs(x = "Predicted value of *p*", 
+       y = "Real position") +
+  theme_bw() +
+  theme(legend.position="bottom",
+        axis.title.x = ggtext::element_markdown(), 
+        legend.text=element_text(size=10.5)) +
+  scale_y_continuous(limits =c(0, 1), breaks = c(0, 1))  +
+  scale_color_brewer(palette = "Set1")
+
+kumzari
+
+ggsave("kumzari.png", dpi = 400)
+```
+
+
+LOG LOSS COST FUNCTION
+
+```{r}
+log_loss <- function(p, pos){
+  cost <- -sum(pos*log(p) + (1-pos)*log(1-p))/length(pos)
+  return(cost)
+}
+
+
+test_set %>% count(position)
+
+
+prop_zero.to.one <- nrow(wowa[position == 0])/nrow(wowa)
+log_loss_baseline <- log_loss(prop_zero.to.one, wowa$position)
+
+
+log_loss_model <- log_loss(test_set$predict_mean, test_set$position)
+log_loss_model
+
+wowa <- wowa %>% arrange(doculect)
+doculects <- unique(wowa$doculect)
+prop_by_doc <- c() # proportion of a more frequent position to the total number of observations per doculect
+
+for (i in 1:24){
+  doc_name <- doculects[i]
+  wowa_doc <- wowa[doculect == doc_name]
+  prop <- nrow(wowa_doc[position == 1])/nrow(wowa_doc)
+  if (prop > 1){
+    prop <- nrow(wowa_doc[position == 0])/nrow(wowa_doc)
+  }
+  prop_by_doc[i] <- prop
+}
+
+baseline_by_doc <- c()
+for (i in 1:24){
+  doc_name <- doculects[i]
+  wowa_doc <- wowa[doculect == doc_name]
+  baseline_by_doc[i] <- log_loss(prop_by_doc[i], wowa_doc$position)
+}
+
+data.table(doculects, prop_by_doc)
+data.table(doculects, baseline_by_doc) %>% arrange(baseline_by_doc)
+
+log.loss_by_doc <- c()
+for (i in 1:24){
+  doc_name <- doculects[i]
+  wowa_doc <- test_set[doculect == doc_name]
+  log.loss_by_doc[i] <- log_loss(wowa_doc$predict_mean, wowa_doc$position)
+}
+
+dt_log.loss <- data.table(doculect = doculects, 
+                          score = log.loss_by_doc, 
+                          metric = "model")
+
+dt_baseline <- data.table(doculect = doculects, 
+                          score = baseline_by_doc, 
+                          metric = "baseline")
+
+combined_metric <- rbind(dt_log.loss, dt_baseline)
+
+ggplot(combined_metric) + 
+  geom_bar(aes(y = doculect, x = score, fill = metric), position = position_dodge(width = 0.75), stat = "identity", width = 0.75) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90), 
+        legend.text=element_text(size=11)) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(fill = "") +
+  ylab("") +
+  xlab("Log-loss score")
+ggsave("baseline_log_loss.png", dpi = 400)
+
+overall_log.loss <- data.table(score = c(log_loss_model, log_loss_baseline), Metric = c("model", "baseline"))
+
+ggplot(overall_log.loss) + 
+  geom_bar(aes(x = "", y = score, fill = Metric), stat = "identity", position = position_dodge(width = 0.75)) + 
+  xlab("") +
+  ylab("Log-loss score") + 
+  theme_classic() +
+  scale_fill_brewer(palette = "Set1") +
+  labs(fill = "")
+ggsave("baseline_log_loss_all.png", dpi = 400)
+```
+
+
+```{r}
+prob_vec <- seq(0.01, 0.99, by = 0.01)
+always0 <- c()
+always1 <- c()
+
+for (i in 1:length(prob_vec)){
+  always0[i] <- log_loss(prob_vec[i], 0)
+  always1[i] <- log_loss(prob_vec[i], 1)
+}
+
+ggplot() + 
+  geom_line(aes(x = prob_vec, y = always0, color = "Position always 0")) +
+  geom_line(aes(x = prob_vec, y = always1, color = "Position always 1")) + 
+  theme_classic() +
+  xlab("Predicted *p*") +
+  ylab("Log-loss score") +
+  theme(legend.position="bottom",
+        axis.title.x = ggtext::element_markdown(), 
+        legend.text=element_text(size=10.5)) + 
+  labs(color = "") +
+  scale_color_brewer(palette = "Set1") 
+
+ggsave("log_loss_explanation.png", dpi = 400)
+```
+
+
+
+
+
+
+PARAMETERS
+
+```{r}
+keep_ci <- function(param, ci = 0.95){
+  param_ci <- rethinking::PI(param, prob = ci)
+  return(
+    param[between(param, param_ci[1], param_ci[2])]
+  )
+}
+```
+
+
+
+```{r}
+becm_bare <- c()
+becm_non <- c()
+do_bare <- c()
+do_non <- c()
+goal_bare <- c()
+goal_non <- c()
+other_bare <- c()
+other_non <- c()
+# role_flag[n_sample, role_id, flag_id]
+for (i in 1:5){
+  for (j in 1:2) { 
+  if (i == 1 & j == 1) becm_bare <- inv_logit(role_flag[, i, j])
+  if (i == 1 & j == 2) becm_non <- inv_logit(role_flag[, i, j])
+  if (i == 2 & j == 1) cop_bare <- inv_logit(role_flag[, i, j])
+  if (i == 2 & j == 2) cop_non <- inv_logit(role_flag[, i, j])
+  if (i == 3 & j == 1) do_bare <- inv_logit(role_flag[, i, j])
+  if (i == 3 & j == 2) do_non <- inv_logit(role_flag[, i, j])
+  if (i == 4 & j == 1) goal_bare <- inv_logit(role_flag[, i, j])
+  if (i == 4 & j == 2) goal_non <- inv_logit(role_flag[, i, j])
+  if (i == 5 & j == 1) other_bare <- inv_logit(role_flag[, i, j]) 
+  if (i == 5 & j == 2) other_non <- inv_logit(role_flag[, i, j])
+  }
+}
+
+
+```
+
+
+```{r}
+
+ggplot() + 
+  geom_violin(aes(x = "becm-bare", y = keep_ci(becm_bare), fill = "becm", alpha = 0.75)) + 
+  geom_violin(aes(x = "becm-non", y = keep_ci(becm_non), fill = "becm", alpha = 0.75)) +
+  geom_violin(aes(x = "cop-bare", y = keep_ci(cop_bare), fill = "cop", alpha = 0.75)) + 
+  geom_violin(aes(x = "cop-non", y = keep_ci(cop_non), fill = "cop", alpha = 0.75)) +
+  geom_violin(aes(x = "do-bare", y = keep_ci(do_bare), fill = "do", alpha = 0.75)) +
+  geom_violin(aes(x = "do-non", y = keep_ci(do_non), fill = "do", alpha = 0.75)) +
+  geom_violin(aes(x = "goal-bare", y = keep_ci(goal_bare), fill = "goal", alpha = 0.75)) +
+  geom_violin(aes(x = "goal-non", y = keep_ci(goal_non), fill = "goal", alpha = 0.75)) + 
+  geom_violin(aes(x = "other-bare", y = keep_ci(other_bare), fill = "other", alpha = 0.75)) +
+  geom_violin(aes(x = "other-non", y = keep_ci(other_non), fill = "other", alpha = 0.75)) +
+  geom_point(aes(x = "becm-bare", y = mean(becm_bare))) + 
+  geom_point(aes(x = "becm-non", y = mean(becm_non))) +
+  geom_point(aes(x = "cop-bare", y = mean(cop_bare))) + 
+  geom_point(aes(x = "cop-non", y = mean(cop_non))) +
+  geom_point(aes(x = "do-bare", y = mean(do_bare))) +
+  geom_point(aes(x = "do-non", y = mean(do_non))) +
+  geom_point(aes(x = "goal-bare", y = mean(goal_bare))) + 
+  geom_point(aes(x = "goal-non", y = mean(goal_non))) +
+  geom_point(aes(x = "other-bare", y = mean(other_bare))) +
+  geom_point(aes(x = "other-non", y = mean(other_non))) +
+  ylab("Parameter value on probability scale") + 
+  xlab("") +
+  theme_classic() + 
+  scale_fill_brewer(palette = "Set1") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1), 
+        axis.title.y = ggtext::element_markdown(),
+        legend.position = "none")
+
+ggsave("role_flag.png", dpi = 400)
+```
+
+
+```{r}
+cop <- ggplot() + 
+  geom_density(aes(x = keep_ci(cop_bare), fill = "bare"), alpha = 0.75) + 
+  geom_density(aes(x = keep_ci(cop_non), fill = "non-bare"), alpha = 0.75) +
+  xlim(0, 1) +
+  theme_classic() +
+  xlab("Copula") + 
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none")
+
+do <- ggplot() + 
+  geom_density(aes(x = keep_ci(do_bare), fill = "bare"), alpha = 0.75) + 
+  geom_density(aes(x = keep_ci(do_non), fill = "non-bare"), alpha = 0.75) +
+  xlim(0, 1) +
+  theme_classic() +
+  ylab("") +
+  xlab("Direct Object") + 
+  scale_fill_brewer(palette = "Set1") +
+  labs(fill = "Flagging:") +
+  theme(legend.position = "bottom")
+
+goal <- ggplot() + 
+  geom_density(aes(x = keep_ci(goal_bare), fill = "bare"), alpha = 0.75) + 
+  geom_density(aes(x = keep_ci(goal_non), fill = "non-bare"), alpha = 0.75) +
+  xlim(0, 1) +
+  theme_classic() +
+  ylab("") + 
+  xlab("Goal") + 
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none")
+
+(cop | do | goal) 
+
+ggsave("bare_vs_non.png", dpi = 400, units = "px",
+       width = 3500, height = 3000)
+```
+
+
+```{r}
+text_means <- apply(inv_logit(textID), 2, mean)
+
+log.odds_text <- log(text_means/(1 - text_means))
+
+ggplot() +
+  geom_histogram(aes(x = log.odds_text, fill = "text"), bins = 40) + 
+  xlab("Mean value of the posterior distribution at log odds scale") + 
+  theme_classic() +
+  theme(legend.position = "none") + 
+  scale_fill_brewer(palette = "Set1")
+ggsave("text.png", dpi = 400)
+```
+
+```{r}
+beta_w <- inv_logit(beta_w)
+log.odds_beta <- log(beta_w/(1-beta_w))
+
+ggplot() + 
+  geom_density(aes(x = keep_ci(log.odds_beta), fill = "beta")) +
+  xlab("Parameter value at log odds scale") +
+  theme_classic() + 
+  theme(legend.position = "none") + 
+  scale_fill_brewer(palette = "Set1")
+
+ggsave("weight.png", dpi = 400)
+
+```
+
+
+```{r}
+doculects <- colnames(stan_data30$phylo)
+
+subfam <- c()
+
+for (i in 1:length(doculects)){
+  subfam[i] <- unique(test_set[doculect == doculects[i]]$affiliation2)
+}
+
+phy_inv.logit <- apply(phy, 2, inv_logit)
+phy_log.odds <- log(phy_inv.logit/(1-phy_inv.logit))
+
+
+phy_mean <- apply(phy_log.odds, 2, mean)
+phy_ci <- apply(phy_log.odds, 2, keep_ci)
+
+geo_inv.logit <- apply(geo, 2, inv_logit)
+geo_log.odds <- log(geo_inv.logit/(1-geo_inv.logit))
+
+geo_ci <- apply(geo_log.odds, 2, keep_ci)
+
+plots_vec <- list()
+
+phy_prob_ci <- apply(phy_inv.logit, 2, keep_ci)
+geo_prob_ci <- apply(geo_inv.logit, 2, keep_ci)
+
+combined_phy_geo <- apply(phy_ci+geo_ci, 2, inv_logit)
+
+
+
+for (i in 1:length(doculects)){ 
+  data_doc <- data.frame(geo = geo_prob_ci[,i], phy = phy_prob_ci[,i])
+  plots_vec[[i]] <- ggplot(data = data_doc) + 
+    geom_density(aes(x = geo, fill = "Contact"), alpha = 0.75) + 
+    geom_density(aes(x = phy, fill = "Phylogeny"), alpha = 0.75) + 
+    xlim(c(0, 1)) +
+    scale_fill_brewer(palette = "Set1") +
+    labs(title = doculects[i],
+         subtitle = subfam[i],
+         fill = "Posterior distribution of intercept:") + 
+    xlab("") + 
+    ylab("") +
+    theme_classic()
+}
+
+
+
+ggarrange(plots_vec[[1]], plots_vec[[2]], 
+          plots_vec[[3]], plots_vec[[4]], 
+          plots_vec[[5]], plots_vec[[6]],
+          plots_vec[[7]], plots_vec[[8]], 
+          plots_vec[[9]], plots_vec[[10]],
+          plots_vec[[11]], plots_vec[[12]], 
+          plots_vec[[13]], plots_vec[[14]], 
+          plots_vec[[15]], plots_vec[[16]],
+          plots_vec[[17]], plots_vec[[18]], 
+          plots_vec[[19]], plots_vec[[20]], 
+          plots_vec[[21]], plots_vec[[22]], 
+          plots_vec[[23]], plots_vec[[24]],
+          ncol = 4, nrow = 6, 
+          label.x = "Intercept parameter value",
+          common.legend = T, legend = "bottom")
+
+ggsave("phy_geo_post.png", dpi = 400, width = 7, height = 8.5)
+
+
+
+## Combined
+for (i in 1:length(doculects)){ 
+  data_doc <- data.frame(combined = combined_phy_geo[,i])
+  plots_vec[[i]] <- ggplot(data = data_doc) + 
+    geom_density(aes(x = combined, fill = "Combined phylogeny and contact intercepts"), alpha = 0.75) + 
+    xlim(c(0, 1)) +
+    scale_fill_brewer(palette = "Set1") +
+    labs(title = doculects[i],
+         subtitle = subfam[i],
+         fill = "Posterior distribution of intercept:") +
+    xlab("") + 
+    ylab("") +
+    theme_classic()
+}
+
+ggarrange(plots_vec[[1]], plots_vec[[2]], 
+          plots_vec[[3]], plots_vec[[4]], 
+          plots_vec[[5]], plots_vec[[6]],
+          plots_vec[[7]], plots_vec[[8]], 
+          plots_vec[[9]], plots_vec[[10]],
+          plots_vec[[11]], plots_vec[[12]], 
+          plots_vec[[13]], plots_vec[[14]], 
+          plots_vec[[15]], plots_vec[[16]],
+          plots_vec[[17]], plots_vec[[18]], 
+          plots_vec[[19]], plots_vec[[20]], 
+          plots_vec[[21]], plots_vec[[22]], 
+          plots_vec[[23]], plots_vec[[24]],
+          ncol = 4, nrow = 6, 
+          label.x = "Intercept parameter value",
+          common.legend = T, legend = "bottom")
+
+ggsave("combined_intercept_post.png", dpi = 400, width = 7, height = 8.5)
+
+```
+
+
+

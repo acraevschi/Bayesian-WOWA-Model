@@ -1,0 +1,40 @@
+---
+title: "run_upd_prior"
+author: "Alexandru Craevschi"
+date: "14 05 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ape)
+library(fdrtool)
+library(patchwork)
+library(rethinking)
+library(rstan)
+library(cowplot)
+library(flextable)
+library(reshape2)
+
+options(mc.cores = detectCores())
+```
+
+
+```{r}
+# Increasing distance between unrelated doculects to make off diagonal correlation converge to 0
+stan_data70 <- readRDS("final_training_set.rds")
+
+model_delta0_65_diff.scaling <- rstan::stan("stan_code/model_diff_prior1.stan", 
+                      data = stan_data70, 
+                      chains = 4, 
+                      cores = 8, 
+                      iter = 3000, 
+                      seed = 88096, # this line is not strictly necessary, but needed to reproduce the results
+                      control = list(adapt_delta=0.99, max_treedepth = 12))
+
+saveRDS(model_delta0_65_diff.scaling, "upd_prior_fitted/final_training_model_4chains.rds")
+rm(model_delta0_65_diff.scaling)
+```
+
+
+

@@ -1,0 +1,186 @@
+---
+title: "Pre-processing"
+author: "Alexandru Craevschi"
+date: "23 04 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ape)
+library(caret)
+library(dagitty)
+library(datasets)
+library(data.table)
+library(dplyr)
+library(fdrtool)
+library(flextable)
+library(ggcorrplot)
+library(patchwork)
+library(reshape2)
+library(lazyWeave)
+library(tidyverse)
+library(lingtypology)
+library("cowplot")
+
+```
+
+
+```{r}
+geodistance <- readRDS("walking_distances.rds")/1000000 # distance in thousands of km
+geodistance <- geodistance[order(rownames(geodistance)), order(colnames(geodistance))]
+# Change the name of RDS file in the following function to change scaling of the tree
+## All the trees in different scalings are named df_phylo_glotto and some info about scaling
+phylodistance <- readRDS("df_phylo_glotto_multiple.rds")
+phylo.corr <- vcv.phylo(phylodistance, corr = TRUE)
+phylo.corr <- phylo.corr[order(rownames(phylo.corr)), order(colnames(phylo.corr))]
+
+# Due to number of digits after comma, some numbers slightly differ 
+# the difference is minor but affects the model
+# The following piece of code tackles this problem 
+
+for (i in 1:length(colnames(geodistance))){
+  for (j in 1:length(colnames(phylo.corr))){
+    geodistance[i, j] <- round(geodistance[j, i], digits = 3)
+    phylo.corr[i, j] <- round(phylo.corr[j, i], digits = 3)
+  }
+}
+```
+
+```{r}
+# If the output of phylo.corr is inspected, the distance between two completely unrelated
+# doculects is 0, so I transform it to make 3. After running first models, I observed that distance
+# of 1 may not always yield correlation of 0 between unrelated doculects. 
+# Given what we know from comparative historical linguistics, we would like to avoid non-zero
+# correlation between unrelated doculects
+mod_phylo.corr <- matrix(0, nrow(phylo.corr), ncol(phylo.corr))
+colnames(mod_phylo.corr) <- colnames(phylo.corr)
+rownames(mod_phylo.corr) <- rownames(phylo.corr)
+for (i in 1:nrow(phylo.corr)){
+  for (j in 1:ncol(phylo.corr)){
+    mod_phylo.corr[i, j] <- abs(phylo.corr[i, j] - 1)
+    if (mod_phylo.corr[i, j] == 1) mod_phylo.corr[i, j] <- 3
+  }
+}
+
+```
+
+
+
+
+```{r}
+wowa <- data.table( 
+  read.csv("whole_wowa/whole_wowa.tsv", sep="\t", header=T,
+                  stringsAsFactors=FALSE,
+                  fill=NA, encoding = "utf8") 
+  ) %>% 
+  mutate(flag_simple = ifelse(flag == "bare", "bare", "non-bare"),
+             latitude = as.numeric(location1), 
+             longitude = as.numeric(location2)
+             ) %>% 
+  mutate(role_mod = 
+           case_when(
+             role %in% c("do", "do-def", "poss") ~ "do", 
+             role %in% c("becm-c", "becm") ~ "becm",
+             role %in% c("goal", "goal-c") ~ "goal", 
+             role == "cop" ~ "cop", 
+             TRUE ~ "other"), 
+         flag_simple = ifelse(flag == "bare", "bare", "non-bare"),
+         latitude = as.numeric(location1), 
+         longitude = as.numeric(location2)) %>% 
+  # We avoid forms that are hard to be classified as either pronoun or noun phrase
+  # We avoid missing data, there are only few such data points, most notably
+  # there is Christian NENA variety of Barwar without the geographical coordinates
+  filter(!is.na(latitude) & 
+           !is.na(weight) & 
+           (pro != "wh") &
+           (pro != "other"))
+
+
+
+# There is a text (textID = F) which only has one data point in the entire WOWA, we want to exclude it
+arhavi_text.F <- wowa[doculect == "arhavi" & textID == "F"]
+wowa <- anti_join(wowa, arhavi_text.F)
+
+saveRDS(wowa, "wowa_recoded.rds")
+```
+
+
+
+```{r}
+# Text IDs are unique across individual doculects, so I make it individual for the whole dataset
+doculects <- wowa$doculect
+textID <- wowa$textID
+
+newID <- c(1)
+indexID <- 1
+
+for (i in 2:length(doculects)){
+  if (doculects[i] == doculects[i-1] & textID[i] == textID[i-1]){
+    newID <- c(newID, indexID)
+  } else {
+    indexID <- indexID + 1
+    newID <- c(newID, indexID)
+  }
+}
+
+wowa$new_textID <- newID
+```
+
+Final dataset used for training and prediction. The difference is that here I try to divide dataset into parts with proportionally well represented grammatical roles and flagging types for training and testing set. 
+
+```{r}
+ 
+set.seed(12)
+wowa <- wowa %>% 
+  mutate(n = row_number()) %>% 
+  select(n, everything())
+
+train_set <- wowa %>% 
+  group_by(role_mod, flag_simple) %>% 
+  sample_frac(.7)
+
+test_set <- anti_join(wowa, train_set)
+
+saveRDS(test_set, "wowa_test_set_dt.rds")
+
+test_set
+```
+
+```{r}
+training_set <- with(train_set, list(
+  weight = weight,
+  pos = position,
+  geo_dist = geodistance,
+  phylo = mod_phylo.corr,
+  num_doc = length(unique(doculect)),
+  textID = new_textID,
+  role = as.integer(factor(role_mod)),
+  flag = as.integer(factor(flag_simple)),
+  doculect = as.integer(factor(doculect)), 
+  n = nrow(train_set)
+))
+
+testing_set <- with(test_set, list(
+  weight = weight,
+  pos = position,
+  geo_dist = geodistance,
+  phylo = mod_phylo.corr,
+  num_doc = length(unique(doculect)),
+  textID = new_textID,
+  role = as.integer(factor(role_mod)),
+  flag = as.integer(factor(flag_simple)),
+  doculect = as.integer(factor(doculect)), 
+  n = nrow(test_set)
+))
+
+saveRDS(training_set, "final_training_set.rds")
+saveRDS(testing_set, "final_testing_set.rds")
+```
+
+
+
+
+
+
+
