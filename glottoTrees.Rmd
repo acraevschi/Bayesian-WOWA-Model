@@ -15,7 +15,6 @@ library(phyloWeights)
 library(glottoTrees)
 library(ggcorrplot)
 library(geiger)
-library(rethinking)
 ```
 
 
@@ -90,6 +89,8 @@ phylo.corr <- vcv.phylo(all_wowa, corr = T)
 # Visualization of the results
 ggcorrplot(phylo.corr, lab = T)
 plot_glotto(all_wowa, nodelabels = F)
+
+saveRDS(all_wowa, "df_phylo_glotto_delta0_65.rds")
 ```
 
 ```{r}
