@@ -1,5 +1,5 @@
 # Masters thesis | WOWA 
-This is the model I designed for the analysis of WOWA dataset. To read more about the research context and dataset relevance, please refer to [WOWA website](https://multicast.aspra.uni-bamberg.de/resources/wowa/). 
+The model was designed for the analysis of WOWA dataset. To read more about the research context and dataset relevance, please refer to [WOWA website](https://multicast.aspra.uni-bamberg.de/resources/wowa/). 
 
 You can run the whole code on your own computer, in case you have Stan installed and set up. Note though that some chunks have certain requirements. For instance, [gmapsdistance](https://cran.r-project.org/web/packages/gmapsdistance/readme/README.html) package makes use of Google Maps and hence requires the respective API being set.
 
